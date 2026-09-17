@@ -1,65 +1,64 @@
-# securing-a-verification.md — step-by-step paid flow
+# securing-a-verification.md — step-by-step paid flow (live rail, USDC x402)
 
 The full agent flow from "I need to prove this settlement mined" to holding a
 granted verification artifact. All steps are HTTP against `https://socseal.xyz`.
 
-## 1. Confirm the verifier is armed
+## 1. Confirm the verifier is live
 
 ```
-GET /health  ->  {"ok":true,"armed":true}
-```
-If not armed, hold off — an unarmed verifier cannot release a granted artifact.
-
-## 2. Create an invoice
-
-```
-POST /invoice  ->  {invoice_id:"sv_...", soc:0.9, soc_atoms:900000000,
-                    worker:"soc1134...", status:"awaiting_open"}
-```
-Keep `invoice_id`, `worker`, and `soc_atoms` — you need all three for the payment.
-
-## 3. Construct and submit the escrow OPEN
-
-Build a `WorkPayOpen` transaction from your wallet that pays the invoice `worker`
-address exactly `soc_atoms` (0.9 SOC at launch). Submit it:
-
-```
-POST /payment/submit_open {"invoice_id":"sv_...","transaction":"<raw hex>"}
+GET /health  ->  {"ok":true,"service":"settle-prover"}
 ```
 
-The service will not accept a fake or under-funded OPEN. This is the escrow: your
-funds are committed on-chain and held until the verification is granted.
-
-## 4. Wait for BLOCK confirmation (SEPTA — the whole point)
-
-Poll `GET /payment/sv_...`. Accept ONLY:
-- `MINED@<block>` — your OPEN landed in a confirmed block.
-
-Reject / keep waiting on:
-- `submitted` — broadcast, not confirmed.
-- `still-in-mempool` — in the mempool, NOT settled.
-
-Why this matters: an escrow that is mempool-accepted but block-rejected never
-settled. The service will not grant a deliverable against a mempool-only OPEN.
-
-## 5. Request the verification
+## 2. Request a verification invoice
 
 ```
-POST /verify/settlement {"txid":"<the-settlement-txid-you-care-about>"}
+POST /verify {"txid":"<64-hex>"}  ->  {invoice_id:"sv_...",
+   pay:{currency:"USDC", network:"Polygon", pay_to:"0xBA3f...8819",
+        amount_atoms:250000, price_usdc:0.25}}
+```
+Keep `invoice_id` and `pay.pay_to` / `pay.amount_atoms` — you need all three for payment.
+Note: txid is bare 64-hex (no `0x` prefix).
+
+## 3. Pay in USDC on Polygon
+
+Send `amount_atoms` (250000 = $0.25) of **native USDC** (`0x3c499c...`) on
+Polygon (chain 137) to the returned `pay_to` (`0xBA3f...8819`) — the only receive
+address. Record the payment's `0x` Polygon txid.
+
+## 4. Confirm payment — wait for BLOCK confirmation (SEPTA — the whole point)
+
+```
+POST /confirm_payment {"invoice_id":"sv_...","payment_txid":"<0x Polygon USDC txid>","payer":"<your id>"}
+```
+The service block-confirms the USDC transfer on-chain (>= amount_atoms to pay_to).
+Accept ONLY a `granted` / `paid` response. A payment that is broadcast but not yet
+mined returns `awaiting_payment` — keep waiting, never treat mempool as settled.
+
+## 5. Receive the signed artifact
+
+Once block-confirmed, the response carries the **ML-DSA-87-signed** artifact:
+```
+{invoice_id, status:"granted", mode:"paid",
+ deliverable:{service, txid, mined:true, block_height, checked_at,
+              verifier, signature, proof_hash}}
 ```
 
-If your payment reached `granted`, verification works against the confirmed chain.
-A mined txid returns `{verified:true, evidence:{...mined, block_height, verifier}}`.
+## 6. Keep the artifact — and re-verify offline with no trust in us
 
-## 6. Keep the artifact
-
-The `evidence` + `proof_hash` is your non-repudiable record:
 - `mined:true` + `block_height` prove it landed in a confirmed block.
-- `verifier` is a hex-sealed fingerprint — any third party can re-verify offline.
+- `verifier` + `signature` let any third party re-verify the artifact **offline**
+  against the public key from `GET /pubkey` (ML-DSA-87, FIPS-204).
 - `proof_hash` binds the evidence canonically.
+
+## Free trial (honest)
+
+A capped free trial (2 per address) returns an **UNSIGNED** verdict + `proof_hash`
+so you can prove the rail works before paying. Signed artifacts require the paid
+USDC path above.
 
 ## Billing note (honest)
 
-Base is 0.9 SOC per verification, escrow-paid, block-confirmed. There is no free
-unlimited tier — the escrow IS the payment rail. Volume discounts kick in at 9 and
-81 verifications for high-frequency settlement monitoring.
+Base is **$0.25 USDC per verification** (Polygon, block-confirmed). No KYC, no
+account, no credit card. There is no unlimited free tier — the USDC payment IS
+the rail. SOC is the underlying sovereign store being proven; we charge USDC as
+the liquid operating currency and never sell SOC to raise operating cash.

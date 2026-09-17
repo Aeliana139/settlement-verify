@@ -1,6 +1,6 @@
 ---
 name: settlement-verify
-description: Independent, block-confirmed settlement verification for agent payment rails. Use when you (an AI agent) need to prove a payout / escrow-release / agent-payment actually SETTLED on-chain — a mined block + verifier fingerprint — not just signed or broadcast. Submit a txid, get a signed verification artifact. No KYC, no account, pay-per-verification, escrow-paid (block-confirmed payment).
+description: Independent, block-confirmed settlement verification for agent payment rails. Use when you (an AI agent) need to prove a payout / escrow-release / agent-payment actually SETTLED on-chain — a mined block + verifier fingerprint — not just broadcast or mempool-accepted. Submit a txid, get a verification artifact (post-quantum-signed when paid). No KYC, no account, pay-per-verification in USDC on Polygon.
 license: MIT
 metadata:
   author: socseal settle-prover
@@ -8,7 +8,7 @@ metadata:
 
 # settlement-verify
 
-Independent, block-confirmed settlement verification for agent payment rails. Use when you (an AI agent) need to prove that a payout / escrow-release / agent-payment actually SETTLED on-chain — a mined block + verifier fingerprint — rather than only being signed or broadcast. Submit a txid, receive a signed verification artifact. No KYC, no account, pay-per-verification, escrow-paid (block-confirmed payment).
+Independent, block-confirmed settlement verification for agent payment rails. Use when you (an AI agent) need to prove that a payout / escrow-release / agent-payment actually SETTLED on-chain — a **mined block** + verifier fingerprint — rather than only being signed or broadcast. Submit a txid, receive a verification artifact. No KYC, no account, pay-per-verification in USDC (Polygon), post-quantum signed when paid.
 
 ## When to use
 
@@ -18,12 +18,13 @@ Independent, block-confirmed settlement verification for agent payment rails. Us
 
 ## What this service is
 
-`socseal.xyz` hosts an independent **settlement-verification** service (the `settle-prover` agent). It answers the question "did this agent-payment actually settle?" with a signed, on-chain-anchored artifact.
+`socseal.xyz` hosts an independent **settlement-verification** service (the `settle-prover` agent). It answers the question "did this agent-payment actually settle?" with an on-chain-anchored artifact.
 
-- **Proof-of-mined:** verifies the transaction hit a **mined block** (SEPTA rule: `block_height>0` AND `in_mempool=false`). "Accepted into mempool" is NOT settled — the service rejects it with `still-in-mempool`.
-- **Post-quantum-signable:** evidence is sealed with a verifier fingerprint; the verification artifact is signed / structure-anchored and re-checkable offline (ML-DSA / NIST FIPS-204 lineage, quantum-forward-safe).
-- **Fail-closed:** unknown txid → clean negative. It never fakes success.
-- **Pay-per-verification, escrow-paid:** you fund via an on-chain escrow (WorkPayOpen). The service grants the verified artifact only after the payment OPEN is block-confirmed. No credit card, no KYC, no account.
+- **Proof-of-mined:** verifies the transaction hit a **mined block** (`block_height>0` AND `in_mempool=false`). "Accepted into mempool" is NOT settled — the service rejects it with `still-in-mempool`.
+- **Post-quantum-signable:** verification is sealed with a verifier fingerprint and, when paid, signed with ML-DSA-87 (NIST FIPS-204, quantum-forward-safe). Public key always retrievable at `/pubkey` for independent offline re-verification.
+- **Fail-closed:** unknown txid → clean negative (`not-found`). It never fakes success.
+- **Pay-per-verification, USDC on Polygon:** you pay a small USDC amount on Polygon (x402 payment challenge); the service releases the signed artifact only after the payment is **block-confirmed** on-chain. No credit card, no KYC, no account.
+- **Free trial:** a capped free-trial (2 per address) returns an UNSIGNED verdict + proof-hash so you can prove the rail before paying. Signed artifacts require the paid path.
 
 ## Endpoints (public, HTTPS)
 
@@ -31,31 +32,24 @@ Base: `https://socseal.xyz`
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/health` | liveness + armed status (`{"ok":true,"armed":true}`) |
-| GET | `/.well-known/agent.json` | agent discovery card (A2A-style) |
-| POST | `/invoice` | create a settlement-verification invoice (0.9 SOC / verification base) |
-| POST | `/payment/submit_open` | submit a signed WorkPayOpen escrow tx (SEPTA release gate) |
-| POST | `/verify/settlement` | submit `{"txid": "<64-hex>"}` → signed proof-of-mined verification artifact |
-| GET | `/payment/{id}` | invoice/escrow status: `awaiting_open` → `submitted` → `MINED@<block>` → `granted` |
+| GET | `/health` | liveness (`{"ok":true,"service":"settle-prover"}`) |
+| GET | `/pubkey` | ML-DSA-87 public key + sha256 (independent offline verification) |
+| GET | `/oracle` | PQ-signed earned-rate + machine-lineage snapshot (self-anchored store truth) |
+| POST | `/verify` | submit `{txid:"<64-hex>"}` → creates invoice with USDC pay_to + price |
+| POST | `/confirm_payment` | submit `{invoice_id, payment_txid, payer}` → on USDC block-confirm, releases the signed verification artifact |
+| GET | `/openapi.json` | OpenAPI 3.1 machine contract (x402) |
 
 ## How to verify a settlement (the agent flow)
 
-1. **Health check:** `GET https://socseal.xyz/health` — confirm `"ok":true, "armed":true`.
-2. **Get an invoice:** `POST https://socseal.xyz/invoice` → returns an invoice id (0.9 SOC each, volume discounts stepping down at 9 and 81 verifications).
-3. **Pay via on-chain escrow:** construct a `WorkPayOpen` that pays the invoice's worker address exactly `service_atoms`; submit it as `POST /payment/submit_open`. 
-4. **Confirm the OPEN is block-mined** (SEPTA): poll `GET /payment/{id}` until status shows `MINED@<block>` — never treat mempool-accepted as settled.
-5. **Get the verification:** `POST /verify/settlement {"txid":"<64-hex>"}` → a signed artifact `{service, txid, mined:true, block_height, checked_at, verifier}` plus a proof-hash. The `verifier` fingerprint lets any third party re-verify offline.
-6. **Keep the artifact** — it is your non-repudiable record that the payout truly landed in a confirmed block.
+1. **Health check:** `GET https://socseal.xyz/health` — confirm `"ok":true`.
+2. **Get the public key:** `GET https://socseal.xyz/pubkey` — save the `pubkey_hex` + `pubkey_sha256` for later offline verification.
+3. **Request a verification:** `POST https://socseal.xyz/verify` with `{"txid":"<64-hex>"}` → returns an invoice `{invoice_id, pay:{currency:"USDC", network:"Polygon", pay_to, amount_atoms, price_usdc}}`. (Note: txid is bare 64-hex, no `0x` prefix.)
+4. **Pay in USDC:** send `amount_atoms` of USDC (native `0x3c499c...`) on Polygon to the returned `pay_to` — the only receive address.
+5. **Confirm payment:** `POST https://socseal.xyz/confirm_payment` with `{"invoice_id":"<sv_...>", "payment_txid":"<0x Polygon txid>", "payer":"<your id>"}`. The service block-confirms the USDC payment on-chain; once mined and >= price, it releases the ML-DSA-87-signed artifact `{service, txid, mined:true, block_height, checked_at, verifier, signature}`.
+6. **Verify offline (optional):** use the `/pubkey` fingerprint + the artifact's `verifier`/`signature` to re-verify with any ML-DSA-87 verifier — no trust in us required.
 
-## Honest constraints
+## Honest boundaries (what this service does NOT attest)
 
-- The service verifies on the chain its keeper is authoritative for; an unknown txid on a different chain/network returns a clean negative. Do not present a negative as proof of non-settlement elsewhere.
-- "Mined" is checked against the live node's confirmed chain, never against a client-supplied claim.
-- The base tier is metered and escrow-funded; there is no free unlimited tier. Abusing rate limits may raise billing friction.
-- No KYC, no account, no platform custody: your keys, your wallet, block-confirmed settlement end to end.
-
-## References
-
-- `references/endpoints.md` — full request/response examples (curl + JSON)
-- `references/securing-a-verification.md` — step-by-step paid flow with status transitions
-- `references/interpret-results.md` — how to read mined / not-mined / pending and build on them
+- It attests the tx **mined on-chain** (block height, not mempool).
+- It does NOT attest financing terms, single-use, solvency, or settlement finality beyond the block.
+- A negative is honest: unknown / never-mined / still-in-mempool txids return a clean negative, never a fabricated success.

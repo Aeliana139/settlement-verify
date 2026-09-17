@@ -60,6 +60,6 @@ validation, not a verdict.
 2. "Mined" is a confirmed-block fact at `checked_at`. A block could later be
    orphaned (rare, chain-specific); the artifact records the height and time it
    WAS confirmed.
-3. Payment (the escrow OPEN, 0.9 SOC) is itself block-confirmed before any
+3. Payment (the USDC Open, $0.25) is itself block-confirmed before any
    artifact is granted — so the payment proof and the verification proof share
    the same SEPTA discipline.
