@@ -7,18 +7,18 @@ other surfaces via `skills.sh`).
 
 When an agent needs to prove that a payout / escrow-release / agent-payment
 actually **mined** — a confirmed block + verifier fingerprint — rather than only
-being signed or broadcast, this skill points at a live, public, escrow-paid
+being signed or broadcast, this skill points at a live, public, paid
 verification service.
 
 - **Proof-of-mined (SEPTA):** `block_height>0` AND `in_mempool=false`. Mempool-only is NOT settled.
-- **Post-quantum-forward:** the verification artifact is sealed with a verifier fingerprint (ML-DSA / FIPS-204 lineage), re-checkable offline.
+- **Post-quantum-forward:** the verification artifact is sealed with a verifier fingerprint (ML-DSA-87 / FIPS-204 lineage), re-checkable offline.
 - **Honest fail-closed:** unknown / never-mined txid returns a clean negative — never a fake success.
-- **No KYC, no account, escrow-paid:** fund via on-chain escrow; the artifact is granted only after the payment OPEN is block-confirmed.
+- **No KYC, no account, USDC-paid:** fund via **USDC on Polygon**; the signed artifact is granted only after a block-confirmed USDC transfer to the service (capped free trial first).
 
 ## Service
 
 Live, armed, and publicly reachable at **https://socseal.xyz**
-(`GET /health` → `{"ok":true,"armed":true}`; discovery card at `/.well-known/agent.json`).
+(`GET /health` → `{"ok":true,"armed":true}`; discovery card at `/.well-known/agent.json`; x402 at `/.well-known/x402`).
 
 ## Install
 
@@ -30,9 +30,9 @@ npx skills add <owner>/settlement-verify
 ## Use (short version)
 
 1. `GET https://socseal.xyz/health` — confirm armed.
-2. `POST /invoice` → 0.9 SOC per verification.
-3. Fund the escrow OPEN, wait for `MINED@<block>` (never mempool).
-4. `POST /verify/settlement {"txid":"<64-hex>"}` → signed proof-of-mined artifact.
+2. `POST /verify {"txid":"<64-hex>"}` → HTTP **402** x402 challenge (USDC on Polygon, $0.25/verify, payTo given). *(This 402 is the machine-readable payment prompt — not an error.)*
+3. Send **USDC on Polygon** to the `payTo` address from the challenge (or create the invoice via `POST /invoice {"txid":...}`).
+4. `POST /confirm_payment {"invoice_id":..., "payment_txid":...}` → on block-confirm, receive the signed ML-DSA-87 proof-of-mined artifact.
 
 Full flow: see `SKILL.md` and `references/`.
 

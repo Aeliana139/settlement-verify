@@ -35,7 +35,7 @@ Base: `https://socseal.xyz`
 | GET | `/health` | liveness (`{"ok":true,"service":"settle-prover"}`) |
 | GET | `/pubkey` | ML-DSA-87 public key + sha256 (independent offline verification) |
 | GET | `/oracle` | PQ-signed earned-rate + machine-lineage snapshot (self-anchored store truth) |
-| POST | `/verify` | submit `{txid:"<64-hex>"}` → creates invoice with USDC pay_to + price |
+| POST | `/verify` | submit `{txid:"<64-hex>"}` → unpaid returns HTTP **402** x402 payment challenge (USDC pay_to + price); with a valid x402 token → creates the invoice |
 | POST | `/confirm_payment` | submit `{invoice_id, payment_txid, payer}` → on USDC block-confirm, releases the signed verification artifact |
 | GET | `/openapi.json` | OpenAPI 3.1 machine contract (x402) |
 
@@ -43,7 +43,7 @@ Base: `https://socseal.xyz`
 
 1. **Health check:** `GET https://socseal.xyz/health` — confirm `"ok":true`.
 2. **Get the public key:** `GET https://socseal.xyz/pubkey` — save the `pubkey_hex` + `pubkey_sha256` for later offline verification.
-3. **Request a verification:** `POST https://socseal.xyz/verify` with `{"txid":"<64-hex>"}` → returns an invoice `{invoice_id, pay:{currency:"USDC", network:"Polygon", pay_to, amount_atoms, price_usdc}}`. (Note: txid is bare 64-hex, no `0x` prefix.)
+3. **Request a verification:** `POST https://socseal.xyz/verify` with `{"txid":"<64-hex>"}` → returns HTTP **402** with the x402 payment challenge `{accepts:[{network, asset, amount, payTo}]}` — the machine-readable USDC price + receive address. *(This 402 is the payment prompt, not an error.)* For a direct invoice object, `POST /invoice` with the same txid. (txid is bare 64-hex, `0x` optional.)
 4. **Pay in USDC:** send `amount_atoms` of USDC (native `0x3c499c...`) on Polygon to the returned `pay_to` — the only receive address.
 5. **Confirm payment:** `POST https://socseal.xyz/confirm_payment` with `{"invoice_id":"<sv_...>", "payment_txid":"<0x Polygon txid>", "payer":"<your id>"}`. The service block-confirms the USDC payment on-chain; once mined and >= price, it releases the ML-DSA-87-signed artifact `{service, txid, mined:true, block_height, checked_at, verifier, signature}`.
 6. **Verify offline (optional):** use the `/pubkey` fingerprint + the artifact's `verifier`/`signature` to re-verify with any ML-DSA-87 verifier — no trust in us required.
